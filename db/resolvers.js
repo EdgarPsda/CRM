@@ -1,5 +1,6 @@
 const User = require('../models/User');
 const Product = require('../models/Product');
+const Client = require('../models/Client');
 const bcryptjs = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config({ path: '.env' });
@@ -14,13 +15,15 @@ const createToken = (user, secret, expiresIn) => {
 // Resolvers
 const resolvers = {
     Query: {
+
+        // Users
         getUser: async (_, { token }) => {
-            console.log(token);
             const userId = await jwt.verify(token, process.env.SECRET);
 
             return userId;
         },
 
+        // Products
         getProducts: async () => {
             try {
                 const products = await Product.find({});
@@ -40,6 +43,41 @@ const resolvers = {
             }
 
             return product;
+        },
+
+        // Clients
+        getClients: async () => {
+            try {
+                const clients = await Client.find({});
+                return clients;
+
+            } catch (error) {
+                console.log(error);
+            }
+        },
+
+        getClientsByVendor: async (_, { }, ctx) => {
+            try {
+                const clients = await Client.find({ vendor: ctx.user.id.toString() })
+                return clients;
+            } catch (error) {
+                console.log(error);
+            }
+        },
+
+        getClient: async (_, { id }, ctx) => {
+            // Check if the client exists
+            const client = await Client.findById({ _id: id });
+
+            if (!client) {
+                throw new Error("Client not found");
+            }
+            // Only view for vendor who has created the client
+            if (client.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don\'t have access to this client");
+            }
+
+            return client;
         }
 
 
@@ -128,6 +166,67 @@ const resolvers = {
 
             return "Product Deleted";
 
+        },
+
+        // Client Mutation
+        newClient: async (_, { input }, ctx) => {
+            // Verify if the client is already in DB
+            const { email } = input;
+
+            const client = await Client.findOne({ email });
+
+            if (client) {
+                throw new Error("Client already created");
+            }
+
+            const newClient = new Client(input);
+
+            // Assign vendor
+            newClient.vendor = ctx.user.id;
+            // Save in DB
+            try {
+                const result = await newClient.save();
+
+                return result;
+
+            } catch (error) {
+                console.log(error);
+            }
+        },
+
+        updateClient: async (_, { id, input }, ctx) => {
+            let client = await Client.findById(id);
+
+            if (!client) {
+                throw new Error("Client not found");
+            }
+
+            if (client.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don't have permissions to udpate this client");
+            }
+
+            client = await Client.findOneAndUpdate({ _id: id }, input, { new: true });
+
+            return client;
+        },
+
+        deleteClient: async (_, { id }, ctx) => {
+            const client = await Client.findOne({ _id: id });
+            if (!client) {
+                throw new Error("Client not found");
+            }
+
+            if (client.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don't have permissions to delete this client");
+            }
+
+            try {
+                await Client.findOneAndDelete({ _id: id });
+                return "Client deleted";
+
+            } catch (error) {
+                console.log(error);
+            }
         }
 
     }
