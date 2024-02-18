@@ -46,6 +46,11 @@ const resolvers = {
             return product;
         },
 
+        searchProduct: async (_, { text }) => {
+            const products = await Product.find({ $text: { $search: text } }).limit(10);
+            return products;
+        },
+
         // Clients
         getClients: async () => {
             try {
@@ -118,10 +123,69 @@ const resolvers = {
         },
 
         getOrdersByStatus: async (_, { state }, ctx) => {
-            const orders = await Order.find({ vendor: ctx.user.id, status: state });
-            return orders;
-        }
+            if (!ctx.user) {
+                throw new Error("Authentication required for this action");
+            }
 
+            try {
+                const orders = await Order.find({ vendor: ctx.user.id, status: state });
+                return orders;
+
+            } catch (error) {
+                console.error("Error getting orders by status: ", error);
+                throw new Error("Failed to get orders");
+            }
+        },
+
+        bestClients: async () => {
+            const clients = await Order.aggregate([
+                { $match: { status: "COMPLETED" } },
+                {
+                    $group: {
+                        _id: "$client",
+                        total: { $sum: "$total" }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "clients",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "client"
+                    }
+                }
+            ]);
+
+            return clients;
+        },
+
+        bestVendors: async () => {
+            const vendors = await Order.aggregate([
+                { $match: { status: "COMPLETED" } },
+                {
+                    $group: {
+                        _id: "$vendor",
+                        total: { $sum: "$total" }
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "_id",
+                        foreignField: "_id",
+                        as: "vendor"
+                    }
+                },
+                {
+                    $limit: 5
+                },
+                {
+                    $sort: { total: -1 }
+                }
+            ]);
+
+            return vendors;
+        }
 
     },
     Mutation: {
