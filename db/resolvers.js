@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const Product = require('../models/Product');
 const Client = require('../models/Client');
+const Order = require('../models/Order');
 const bcryptjs = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config({ path: '.env' });
@@ -78,6 +79,47 @@ const resolvers = {
             }
 
             return client;
+        },
+
+        // Orders
+        getOrders: async () => {
+            try {
+                const orders = await Order.find({});
+                return orders;
+            } catch (error) {
+                console.log(error);
+            }
+        },
+
+        getOrdersByVendor: async (_, { }, ctx) => {
+            try {
+                const orders = await Order.find({ vendor: ctx.user.id });
+                return orders;
+            } catch (error) {
+                console.log(error);
+            }
+        },
+
+        getOrder: async (_, { id }, ctx) => {
+            const order = await Order.findById(id);
+            if (!order) {
+                throw new Error("Order not found");
+            }
+
+            if (order.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don't have permissions to this order");
+            }
+
+            try {
+                return order;
+            } catch (error) {
+                console.log(error);
+            }
+        },
+
+        getOrdersByStatus: async (_, { state }, ctx) => {
+            const orders = await Order.find({ vendor: ctx.user.id, status: state });
+            return orders;
         }
 
 
@@ -227,6 +269,97 @@ const resolvers = {
             } catch (error) {
                 console.log(error);
             }
+        },
+
+        // Order Mutation
+        newOrder: async (_, { input }, ctx) => {
+            // Verify if the client exist
+            const client = await Client.findById(input.client);
+            if (!client) {
+                throw new Error("Client not found");
+            }
+            // Verify if the client is of the vendor
+            if (client.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don't have permissions to make orders of this client");
+            }
+            // Check stock quantities
+            for await (const item of input.order) {
+                const { id } = item;
+                const product = await Product.findById(id);
+
+                if (item.quantity > product.stock) {
+                    throw new Error(`The item: ${product.name} exceed the available stock`);
+                } else {
+                    product.stock = product.stock - item.quantity;
+                    await product.save();
+                }
+            }
+
+            // Create Order
+            const newOrder = new Order(input);
+
+            // Assign a vendor
+            newOrder.vendor = ctx.user.id;
+            // Save in DB
+            const result = await newOrder.save();
+            return result;
+        },
+
+        updateOrder: async (_, { id, input }, ctx) => {
+
+            const { client } = input;
+
+            const order = await Order.findById(id);
+            if (!order) {
+                throw new Error("Order not found");
+            }
+
+            const clientExist = await Client.findById(client);
+            if (!clientExist) {
+                throw new Error("Client not found");
+            }
+
+            if (clientExist.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don't have permissions to update this order");
+            }
+
+            if (input) {
+                for await (const item of input.order) {
+                    const { id } = item;
+                    const product = await Product.findById(id);
+
+                    if (item.quantity > product.stock) {
+                        throw new Error(`The item: ${product.name} exceed the available stock`);
+                    } else {
+                        product.stock = product.stock - item.quantity;
+                        await product.save();
+                    }
+                }
+
+            }
+
+            const result = await Order.findOneAndUpdate({ _id: id }, input, { new: true });
+            return result;
+        },
+
+        deleteOrder: async (_, { id }, ctx) => {
+            const order = await Order.findById(id);
+            if (!order) {
+                throw new Error("Order not found");
+            }
+
+            if (order.vendor.toString() !== ctx.user.id) {
+                throw new Error("You don't have permissions to delete this order");
+            }
+
+            try {
+                await Order.findOneAndDelete({ _id: id });
+                return "Order deleted";
+            } catch (error) {
+                console.log(error);
+            }
+
+
         }
 
     }
